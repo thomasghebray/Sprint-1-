@@ -1,0 +1,194 @@
+# Thomas Ghebray
+# Sprint 1 
+# Professor Dr.Dobretsberger 
+from flask import Flask
+from flask import render_template, redirect, url_for, request, flash
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+
+app = Flask(__name__)
+app.secret_key = 'secret-key'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///vacations.sqlite3'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = True
+
+db = SQLAlchemy(app)
+
+user_obj = None
+
+
+def logged_user(user):
+    user_obj = user
+
+
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    email = db.Column(db.String(100), unique=True)
+    password = db.Column(db.String(100))
+    name = db.Column(db.String(100))
+
+    def __init__(self, email, password, name):
+        self.name = name
+        self.email = email
+        self.password = password
+
+    def toString(self):
+        return {'name': self.name, 'email': self.email}
+
+
+class Destination(db.Model):
+    __tablename__ = 'destinations'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    country = db.Column(db.String(100))
+    city = db.Column(db.String(100))
+    sightseeing = db.Column(db.String(1000))
+    trips = db.relationship("Trip")
+
+    def __init__(self, country, city, sightseeing):
+        self.country = country
+        self.city = city
+        self.sightseeing = sightseeing
+
+    def toString(self):
+        return (
+            {'id': self.id, 'country': self.country, 'city': self.city, 'sightseeing': self.sightseeing})
+
+
+class Trip(db.Model):
+    __tablename__ = 'trips'
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    destination = db.Column(db.Integer, db.ForeignKey('destinations.id'))
+    transportation = db.Column(db.String)
+    startDate = db.Column(db.String(20))
+    endDate = db.Column(db.String(20))
+    notes = db.Column(db.String(1000))
+    cost = db.Column(db.Float)
+
+    def __init__(self, destination, transportation, startDate, endDate, notes, cost):
+        self.destination = destination
+        self.transportation = transportation
+        self.startDate = startDate
+        self.endDate = endDate
+        self.notes = notes
+        self.cost = cost
+
+    def toString(self):
+        return (
+            {'id': self.id, 'destination': self.destination, 'transportation': self.transportation,
+             'startDate': self.startDate, "endDate": self.endDate, "cost": self.cost, "notes": self.notes})
+
+
+# Pages
+@app.route('/home')
+def home():
+    return render_template('home.html', user=user_obj, trips=Trip.query.all(),
+                           destinations=Destination.query.all())
+
+
+@app.route('/')
+def index():
+    return render_template('index.html', user=user_obj)
+
+
+# Auth
+
+@app.route('/login')
+def login():
+    return render_template('login.html')
+
+
+@app.route('/login', methods=['POST'])
+def login_post():
+    email = request.form.get('email')
+    password = request.form.get('password')
+    remember = True if request.form.get('remember') else False
+
+    user = User.query.filter_by(email=email).first()
+
+    # check if the user actually exists
+    # take the user-supplied password, hash it, and compare it to the hashed password in the database
+    if not user or not check_password_hash(user.password, password):
+        flash('Please check your login details and try again.')
+        return redirect(url_for('login'))  # if the user doesn't exist or password is wrong, reload the page
+
+    # if the above check passes, then we know the user has the right credentials
+    logged_user(user)
+    return redirect(url_for('home'))
+
+
+@app.route('/signup')
+def signup():
+    return render_template('signup.html')
+
+
+@app.route('/signup', methods=['POST'])
+def signup_post():
+    email = request.form.get('email')
+    name = request.form.get('name')
+    password = request.form.get('password')
+
+    print(request.form)
+
+    user = User.query.filter_by(
+        email=email).first()  # if this returns a user, then the email already exists in database
+    print(user)
+    if user:  # if a user is found, we want to redirect back to signup page so user can try again
+        flash('Email address already exists')
+        return redirect(url_for('auth.signup'))
+
+    # create a new user with the form data. Hash the password so the plaintext version isn't saved.
+    new_user = User(email=email, name=name, password=generate_password_hash(password, method='sha256'))
+    print(new_user)
+    # add the new user to the database
+    db.session.add(new_user)
+    db.session.commit()
+    return redirect(url_for('login'))
+
+
+@app.route('/logout')
+def logout():
+    return redirect(url_for('index'))
+
+
+# trips
+@app.route('/new_trip', methods=['GET', 'POST'])
+def new_trip():
+    if request.method == 'POST':
+        if not request.form['destination'] or not request.form['transportation'] or not request.form['startDate'] or not \
+                request.form['endDate'] or not request.form['cost'] or not request.form['notes']:
+            flash('Please enter all the fields', 'error')
+        else:
+            # destination = Destination.query.filter_by(id=int(request.form['destination']))
+            trip = Trip(request.form['destination'], request.form['transportation'], request.form['startDate'],
+                        request.form['endDate'], request.form['notes'], request.form['cost'])
+
+            db.session.add(trip)
+            db.session.commit()
+
+            flash('Trip was successfully added')
+            return redirect(url_for('home'))
+    return render_template('trips_create.html')
+
+
+@app.route('/new_destination', methods=['GET', 'POST'])
+def new_destination():
+    if request.method == 'POST':
+        if not request.form['country'] or not request.form['city'] or not request.form['sightseeing']:
+            flash('Please enter all the fields', 'error')
+        else:
+
+            destination = Destination(request.form['country'], request.form['city'], request.form['sightseeing'])
+
+            db.session.add(destination)
+            db.session.commit()
+
+            flash('Destination was successfully added')
+            return redirect(url_for('home'))
+
+    return render_template('new_destination.html')
+
+
+if __name__ == '__main__':
+    db.create_all()
+
+    app.run(debug=True)
